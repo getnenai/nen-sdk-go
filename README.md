@@ -95,4 +95,4 @@ This SDK uses only the Go standard library.
 
 ## Examples
 
-See the full agent example in [`cmd/nen/templates/anthropic-computer-use/agent.py`](../../cmd/nen/templates/anthropic-computer-use/agent.py).
+See the full agent example in the [Nen documentation](https://docs.getnen.ai/examples/anthropic).
