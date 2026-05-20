@@ -69,3 +69,18 @@ type updateDesktopRequest struct {
 
 // toolLogsResponse is used to decode the opaque tool-logs JSON array.
 type toolLogsResponse = json.RawMessage
+
+// File describes a single entry returned by ListFiles. Modified is a
+// Unix-epoch float with fractional seconds.
+type File struct {
+	Name     string  `json:"name"`
+	Size     int64   `json:"size"`
+	Modified float64 `json:"modified"`
+}
+
+// UploadFileResponse is returned by UploadFile (POST /desktops/:id/files/:name).
+type UploadFileResponse struct {
+	Success  bool   `json:"success"`
+	Size     int64  `json:"size"`
+	Filename string `json:"filename"`
+}

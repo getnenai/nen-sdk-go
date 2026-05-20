@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -228,6 +229,114 @@ func (c *Client) GetToolLogs(ctx context.Context, desktopID string) (json.RawMes
 		return nil, fmt.Errorf("reading response: %w", err)
 	}
 	return json.RawMessage(data), nil
+}
+
+// -- Files --
+
+// ListFiles calls GET /desktops/:id/files and returns the per-desktop drive
+// listing. Files are persisted server-side on EFS and survive controller
+// rebinds; the namespace is flat per desktop and uploads are capped at
+// 100 MiB.
+func (c *Client) ListFiles(ctx context.Context, desktopID string) ([]File, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/desktops/"+desktopID+"/files", nil, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if err := checkStatus(resp); err != nil {
+		return nil, err
+	}
+
+	var out struct {
+		Files []File `json:"files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	return out.Files, nil
+}
+
+// UploadFile calls POST /desktops/:id/files/:name with body streamed to the
+// server. contentType passes through to the controller; an empty string
+// sends "application/octet-stream". The server caps the body at 100 MiB.
+// A per-call 120 s deadline is layered on ctx.
+//
+// This method bypasses the shared do helper so the Content-Type can be set
+// to something other than application/json (which do auto-sets when a body
+// is present).
+func (c *Client) UploadFile(ctx context.Context, desktopID, name string, body io.Reader, contentType string) (*UploadFileResponse, error) {
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	upCtx, cancel := context.WithTimeout(ctx, executeTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(upCtx, http.MethodPost,
+		c.baseURL+"/desktops/"+desktopID+"/files/"+url.PathEscape(name), body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Content-Type", contentType)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if err := checkStatus(resp); err != nil {
+		return nil, err
+	}
+
+	var out UploadFileResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	return &out, nil
+}
+
+// DownloadFile calls GET /desktops/:id/files/:name and returns the body
+// stream plus the response Content-Type. The caller MUST close the
+// returned ReadCloser; the per-call 120 s deadline is released on Close
+// via the cancelReadCloser wrapper so the timer covers the streamed read.
+func (c *Client) DownloadFile(ctx context.Context, desktopID, name string) (io.ReadCloser, string, error) {
+	dlCtx, cancel := context.WithTimeout(ctx, executeTimeout)
+
+	req, err := http.NewRequestWithContext(dlCtx, http.MethodGet,
+		c.baseURL+"/desktops/"+desktopID+"/files/"+url.PathEscape(name), nil)
+	if err != nil {
+		cancel()
+		return nil, "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		cancel()
+		return nil, "", err
+	}
+
+	if err := checkStatus(resp); err != nil {
+		defer resp.Body.Close()
+		cancel()
+		return nil, "", err
+	}
+
+	return &cancelReadCloser{ReadCloser: resp.Body, cancel: cancel}, resp.Header.Get("Content-Type"), nil
+}
+
+// cancelReadCloser wraps a ReadCloser and runs cancel on Close so a
+// per-call context deadline stays live across the streamed body read.
+type cancelReadCloser struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c *cancelReadCloser) Close() error {
+	defer c.cancel()
+	return c.ReadCloser.Close()
 }
 
 // -- Sessions --
