@@ -3,8 +3,10 @@ package nendesktop
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -126,6 +128,88 @@ func TestListFiles_DecodesIsDir(t *testing.T) {
 	}
 	if !byName["Documents"].IsDir {
 		t.Errorf("Documents must be a directory: %+v", byName["Documents"])
+	}
+}
+
+func TestUploadFile_WithPath_AddsQuery(t *testing.T) {
+	var gotPath, gotRawQuery string
+	client, stop := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotRawQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"success":true,"size":3,"filename":"hi.txt"}`))
+	})
+	defer stop()
+
+	if _, err := client.UploadFile(context.Background(), "dsk_1", "hi.txt", strings.NewReader("hi!"), "text/plain", WithPath("Documents")); err != nil {
+		t.Fatalf("UploadFile: %v", err)
+	}
+	if gotPath != "/desktops/dsk_1/files/hi.txt" {
+		t.Errorf("path: got %q", gotPath)
+	}
+	if gotRawQuery != "path=Documents" {
+		t.Errorf("raw query: got %q want path=Documents", gotRawQuery)
+	}
+}
+
+func TestUploadFile_NoOption_OmitsQuery(t *testing.T) {
+	var gotRawQuery string
+	client, stop := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotRawQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"success":true,"size":3,"filename":"hi.txt"}`))
+	})
+	defer stop()
+
+	if _, err := client.UploadFile(context.Background(), "dsk_1", "hi.txt", strings.NewReader("hi!"), "text/plain"); err != nil {
+		t.Fatalf("UploadFile: %v", err)
+	}
+	if gotRawQuery != "" {
+		t.Errorf("raw query: got %q want empty", gotRawQuery)
+	}
+}
+
+func TestDownloadFile_WithPath_AddsQuery(t *testing.T) {
+	var gotPath, gotRawQuery string
+	client, stop := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotRawQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("body"))
+	})
+	defer stop()
+
+	rc, _, err := client.DownloadFile(context.Background(), "dsk_1", "hi.txt", WithPath("Documents"))
+	if err != nil {
+		t.Fatalf("DownloadFile: %v", err)
+	}
+	_, _ = io.ReadAll(rc)
+	_ = rc.Close()
+
+	if gotPath != "/desktops/dsk_1/files/hi.txt" {
+		t.Errorf("path: got %q", gotPath)
+	}
+	if gotRawQuery != "path=Documents" {
+		t.Errorf("raw query: got %q want path=Documents", gotRawQuery)
+	}
+}
+
+func TestDownloadFile_NoOption_OmitsQuery(t *testing.T) {
+	var gotRawQuery string
+	client, stop := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotRawQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("body"))
+	})
+	defer stop()
+
+	rc, _, err := client.DownloadFile(context.Background(), "dsk_1", "hi.txt")
+	if err != nil {
+		t.Fatalf("DownloadFile: %v", err)
+	}
+	_, _ = io.ReadAll(rc)
+	_ = rc.Close()
+
+	if gotRawQuery != "" {
+		t.Errorf("raw query: got %q want empty", gotRawQuery)
 	}
 }
 

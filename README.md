@@ -79,13 +79,13 @@ The `Execute` method uses a 120-second timeout regardless of the client timeout,
 
 ### Files
 
-The shared drive is per-desktop, EFS-backed, and survives controller rebinds. Uploads are capped at 100 MiB.
+The shared drive is per-desktop, EFS-backed, and survives controller rebinds. Uploads are capped at 100 MiB. All three methods accept the same `FileOption` variadic; `WithPath("subdir")` selects a subdirectory for the operation.
 
 | Method | Description |
 |--------|-------------|
 | `ListFiles(ctx, desktopID, opts...)` | List drive entries. Pass `WithPath("subdir")` to list a subdirectory. Returns `[]File`. Directory entries have `IsDir: true`. |
-| `UploadFile(ctx, desktopID, name, body, contentType)` | Upload bytes to `name`. Returns `*UploadFileResponse`. |
-| `DownloadFile(ctx, desktopID, name)` | Stream `name` and its `Content-Type`. Caller closes the returned `io.ReadCloser`. |
+| `UploadFile(ctx, desktopID, name, body, contentType, opts...)` | Upload bytes to `name`. Pass `WithPath("subdir")` to upload into a subdirectory; missing intermediate directories are created on the server. Returns `*UploadFileResponse`. |
+| `DownloadFile(ctx, desktopID, name, opts...)` | Stream `name` and its `Content-Type`. Pass `WithPath("subdir")` to download from a subdirectory. Caller closes the returned `io.ReadCloser`. |
 
 ## Error Handling
 
