@@ -233,12 +233,38 @@ func (c *Client) GetToolLogs(ctx context.Context, desktopID string) (json.RawMes
 
 // -- Files --
 
-// ListFiles calls GET /desktops/:id/files and returns the per-desktop drive
-// listing. Files are persisted server-side on EFS and survive controller
-// rebinds; the namespace is flat per desktop and uploads are capped at
-// 100 MiB.
-func (c *Client) ListFiles(ctx context.Context, desktopID string) ([]File, error) {
-	resp, err := c.do(ctx, http.MethodGet, "/desktops/"+desktopID+"/files", nil, 0)
+// ListFilesOption configures a ListFiles call. Pass values returned
+// by helpers like WithPath as opts to ListFiles.
+type ListFilesOption func(*listFilesOptions)
+
+type listFilesOptions struct {
+	path string
+}
+
+// WithPath narrows the listing to the named subdirectory. An empty
+// path lists the root (the default).
+func WithPath(path string) ListFilesOption {
+	return func(o *listFilesOptions) { o.path = path }
+}
+
+// ListFiles calls GET /desktops/:id/files and returns the per-desktop
+// drive listing. Files are persisted server-side on EFS and survive
+// controller rebinds; uploads are capped at 100 MiB. Directory entries
+// surface with IsDir=true so callers can descend via WithPath.
+func (c *Client) ListFiles(ctx context.Context, desktopID string, opts ...ListFilesOption) ([]File, error) {
+	o := listFilesOptions{}
+	for _, opt := range opts {
+		opt(&o)
+	}
+
+	path := "/desktops/" + desktopID + "/files"
+	if o.path != "" {
+		q := url.Values{}
+		q.Set("path", o.path)
+		path += "?" + q.Encode()
+	}
+
+	resp, err := c.do(ctx, http.MethodGet, path, nil, 0)
 	if err != nil {
 		return nil, err
 	}

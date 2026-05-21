@@ -77,6 +77,16 @@ The `Execute` method uses a 120-second timeout regardless of the client timeout,
 | `GetSession(ctx, desktopID)` | Get session status. Returns `*SessionInfo`. |
 | `DeleteSession(ctx, desktopID)` | Disconnect the session. Returns `error`. |
 
+### Files
+
+The shared drive is per-desktop, EFS-backed, and survives controller rebinds. Uploads are capped at 100 MiB.
+
+| Method | Description |
+|--------|-------------|
+| `ListFiles(ctx, desktopID, opts...)` | List drive entries. Pass `WithPath("subdir")` to list a subdirectory. Returns `[]File`. Directory entries have `IsDir: true`. |
+| `UploadFile(ctx, desktopID, name, body, contentType)` | Upload bytes to `name`. Returns `*UploadFileResponse`. |
+| `DownloadFile(ctx, desktopID, name)` | Stream `name` and its `Content-Type`. Caller closes the returned `io.ReadCloser`. |
+
 ## Error Handling
 
 All API errors return `*APIError`, which carries `StatusCode` and `Body`:
