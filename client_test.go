@@ -80,6 +80,25 @@ func TestListFiles_WithEmptyPath_OmitsQuery(t *testing.T) {
 	}
 }
 
+func TestListFiles_NilOption_Ignored(t *testing.T) {
+	var gotRawQuery string
+	client, stop := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotRawQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"files":[]}`))
+	})
+	defer stop()
+
+	// A nil option must not panic; it should be skipped, and a real
+	// option in the same call should still apply.
+	if _, err := client.ListFiles(context.Background(), "dsk_1", nil, WithPath("Documents"), nil); err != nil {
+		t.Fatalf("ListFiles: %v", err)
+	}
+	if gotRawQuery != "path=Documents" {
+		t.Errorf("raw query: got %q want path=Documents", gotRawQuery)
+	}
+}
+
 func TestListFiles_DecodesIsDir(t *testing.T) {
 	client, stop := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

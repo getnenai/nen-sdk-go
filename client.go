@@ -254,6 +254,9 @@ func WithPath(path string) ListFilesOption {
 func (c *Client) ListFiles(ctx context.Context, desktopID string, opts ...ListFilesOption) ([]File, error) {
 	o := listFilesOptions{}
 	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
 		opt(&o)
 	}
 
