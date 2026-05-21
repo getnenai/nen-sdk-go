@@ -71,11 +71,14 @@ type updateDesktopRequest struct {
 type toolLogsResponse = json.RawMessage
 
 // File describes a single entry returned by ListFiles. Modified is a
-// Unix-epoch float with fractional seconds.
+// Unix-epoch float with fractional seconds. IsDir is true for
+// directory entries; the field is omitted from the wire when false so
+// older servers that don't emit it keep deserializing unchanged.
 type File struct {
 	Name     string  `json:"name"`
 	Size     int64   `json:"size"`
 	Modified float64 `json:"modified"`
+	IsDir    bool    `json:"is_dir,omitempty"`
 }
 
 // UploadFileResponse is returned by UploadFile (POST /desktops/:id/files/:name).

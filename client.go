@@ -233,12 +233,51 @@ func (c *Client) GetToolLogs(ctx context.Context, desktopID string) (json.RawMes
 
 // -- Files --
 
-// ListFiles calls GET /desktops/:id/files and returns the per-desktop drive
-// listing. Files are persisted server-side on EFS and survive controller
-// rebinds; the namespace is flat per desktop and uploads are capped at
-// 100 MiB.
-func (c *Client) ListFiles(ctx context.Context, desktopID string) ([]File, error) {
-	resp, err := c.do(ctx, http.MethodGet, "/desktops/"+desktopID+"/files", nil, 0)
+// FileOption configures a ListFiles, UploadFile, or DownloadFile call.
+// Pass values returned by helpers like WithPath as opts to those methods.
+type FileOption func(*fileOptions)
+
+type fileOptions struct {
+	path string
+}
+
+// WithPath selects a subdirectory under the drive root. On ListFiles
+// it narrows the listing; on UploadFile it specifies the destination
+// subdirectory (missing intermediate directories are created on the
+// server); on DownloadFile it specifies the source subdirectory. An
+// empty path keeps the default of operating at the drive root.
+func WithPath(path string) FileOption {
+	return func(o *fileOptions) { o.path = path }
+}
+
+// applyFileOptions folds opts into a fileOptions value, skipping nil
+// entries so a misbehaving caller cannot panic the client.
+func applyFileOptions(opts []FileOption) fileOptions {
+	o := fileOptions{}
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		opt(&o)
+	}
+	return o
+}
+
+// ListFiles calls GET /desktops/:id/files and returns the per-desktop
+// drive listing. Files are persisted server-side on EFS and survive
+// controller rebinds; uploads are capped at 100 MiB. Directory entries
+// surface with IsDir=true so callers can descend via WithPath.
+func (c *Client) ListFiles(ctx context.Context, desktopID string, opts ...FileOption) ([]File, error) {
+	o := applyFileOptions(opts)
+
+	path := "/desktops/" + desktopID + "/files"
+	if o.path != "" {
+		q := url.Values{}
+		q.Set("path", o.path)
+		path += "?" + q.Encode()
+	}
+
+	resp, err := c.do(ctx, http.MethodGet, path, nil, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -260,20 +299,29 @@ func (c *Client) ListFiles(ctx context.Context, desktopID string) ([]File, error
 // UploadFile calls POST /desktops/:id/files/:name with body streamed to the
 // server. contentType passes through to the controller; an empty string
 // sends "application/octet-stream". The server caps the body at 100 MiB.
-// A per-call 120 s deadline is layered on ctx.
+// A per-call 120 s deadline is layered on ctx. Pass WithPath to upload
+// into a subdirectory; missing intermediate directories are created on
+// the server.
 //
 // This method bypasses the shared do helper so the Content-Type can be set
 // to something other than application/json (which do auto-sets when a body
 // is present).
-func (c *Client) UploadFile(ctx context.Context, desktopID, name string, body io.Reader, contentType string) (*UploadFileResponse, error) {
+func (c *Client) UploadFile(ctx context.Context, desktopID, name string, body io.Reader, contentType string, opts ...FileOption) (*UploadFileResponse, error) {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
+	o := applyFileOptions(opts)
+
 	upCtx, cancel := context.WithTimeout(ctx, executeTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(upCtx, http.MethodPost,
-		c.baseURL+"/desktops/"+desktopID+"/files/"+url.PathEscape(name), body)
+	rawURL := c.baseURL + "/desktops/" + desktopID + "/files/" + url.PathEscape(name)
+	if o.path != "" {
+		q := url.Values{}
+		q.Set("path", o.path)
+		rawURL += "?" + q.Encode()
+	}
+	req, err := http.NewRequestWithContext(upCtx, http.MethodPost, rawURL, body)
 	if err != nil {
 		return nil, err
 	}
@@ -301,11 +349,18 @@ func (c *Client) UploadFile(ctx context.Context, desktopID, name string, body io
 // stream plus the response Content-Type. The caller MUST close the
 // returned ReadCloser; the per-call 120 s deadline is released on Close
 // via the cancelReadCloser wrapper so the timer covers the streamed read.
-func (c *Client) DownloadFile(ctx context.Context, desktopID, name string) (io.ReadCloser, string, error) {
+// Pass WithPath to download from a subdirectory.
+func (c *Client) DownloadFile(ctx context.Context, desktopID, name string, opts ...FileOption) (io.ReadCloser, string, error) {
+	o := applyFileOptions(opts)
 	dlCtx, cancel := context.WithTimeout(ctx, executeTimeout)
 
-	req, err := http.NewRequestWithContext(dlCtx, http.MethodGet,
-		c.baseURL+"/desktops/"+desktopID+"/files/"+url.PathEscape(name), nil)
+	rawURL := c.baseURL + "/desktops/" + desktopID + "/files/" + url.PathEscape(name)
+	if o.path != "" {
+		q := url.Values{}
+		q.Set("path", o.path)
+		rawURL += "?" + q.Encode()
+	}
+	req, err := http.NewRequestWithContext(dlCtx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		cancel()
 		return nil, "", err
